@@ -46,6 +46,8 @@
     - /var/lib/rancher/
     - /var/lib/cni/
     - /etc/cni/net.d
+    - /usr/local/bin/kubectl
+    - /usr/local/bin/crictl
 
 - name: Remove K3s http_proxy files
   ansible.builtin.file:
@@ -94,3 +96,38 @@
     path: /etc/rc.local
     state: absent
   when: proxmox_lxc_configure and rcfile.stat.exists and ((rcslurp.content | b64decode).splitlines() | length) <= 1
+
+- name: Remove apiserver_endpoint vip
+  shell: |
+    ip a delete {{ apiserver_endpoint }}/32 dev ens192 2>/dev/null || true
+
+- block:
+  - name: Get list of network interfaces
+    command: ifconfig -a
+    register: interfaces_output
+    changed_when: false
+
+  - name: Define network interface patterns
+    set_fact:
+      interface_patterns:
+        - "docker0"
+        - "cali"
+        - "veth"
+        - "lxc"
+        - "br-"
+        - "cilium"
+        - "nodelocaldns"
+        - "cni0"
+        - "flannel.1"
+        - "liqo.vxlan"
+        - "lxc_health"
+        - "cilium_vxlan"
+        - "dummy0"
+
+  - name: Remove network interfaces
+    shell: |
+      for pattern in {{ interface_patterns | join(' ') }}; do
+        ifconfig | grep $pattern | awk -F: '{print $1}' | xargs -I {} ip link delete {}
+      done
+      ip link set tunl0 down && ip link delete tunl0 || echo
+    ignore_errors: true

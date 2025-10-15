@@ -36,7 +36,15 @@
 
 - name: Init cluster inside the transient k3s-init service
   ansible.builtin.command:
-    cmd: systemd-run -p RestartSec=2 -p Restart=on-failure --unit=k3s-init k3s server {{ server_init_args }}
+    cmd: >
+      systemd-run
+      -p RestartSec=2
+      -p Restart=on-failure
+      -p Environment=HTTP_PROXY=http://10.11.40.82:6152
+      -p Environment=HTTPS_PROXY=http://10.11.40.82:6152
+      -p Environment=NO_PROXY=*.domain.local,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      --unit=k3s-init
+      k3s server {{ server_init_args }}
     creates: "{{ systemd_dir }}/k3s-init.service"
 
 - name: Verification
@@ -44,11 +52,11 @@
   block:
     - name: Verify that all nodes actually joined (check k3s-init.service if this fails)
       ansible.builtin.command:
-        cmd: "{{ k3s_kubectl_binary | default('k3s kubectl') }} get nodes -l 'node-role.kubernetes.io/master=true' -o=jsonpath='{.items[*].metadata.name}'" # yamllint disable-line rule:line-length
+        cmd: "{{ k3s_kubectl_binary | default('k3s kubectl') }} get nodes -l 'node-role.kubernetes.io/control-plane=true' -o=jsonpath='{.items[*].metadata.name}'" # yamllint disable-line rule:line-length
       register: nodes
       until: nodes.rc == 0 and (nodes.stdout.split() | length) == (groups[group_name_master | default('master')] | length) # yamllint disable-line rule:line-length
       retries: "{{ retry_count | default(20) }}"
-      delay: 10
+      delay: 5
       changed_when: false
   always:
     - name: Save logs of k3s-init.service
